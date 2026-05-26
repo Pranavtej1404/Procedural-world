@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Minimal custom scrollbars and base layout reset */
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #0b0f19;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom styles for high-fidelity slider inputs */
+input[type="range"]::-webkit-slider-thumb {
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+}
+
+/* Scrollbar styling for sidebar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
