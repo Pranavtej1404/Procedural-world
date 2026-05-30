@@ -6,12 +6,8 @@ import { ChunkSandboxView } from './features/sandbox/ChunkSandboxView';
 
 const PRESETS = [
   {
-    name: '🌟 Volcanic Archipelago',
-    config: { octaves: 5, persistence: 0.55, scale: 35, redistribution: 1.5, applyIslandMask: 'archipelago' as const, islandRadius: 80 },
-  },
-  {
-    name: '🌾 Endless Continents',
-    config: { octaves: 4, persistence: 0.45, scale: 65, redistribution: 1.1, applyIslandMask: 'none' as const, islandRadius: 64 },
+    name: '🌾 Endless Continents (Huge)',
+    config: { octaves: 5, persistence: 0.5, scale: 350, redistribution: 1.1, applyIslandMask: 'none' as const, islandRadius: 96 },
   },
   {
     name: '🏔️ Highland Lakes',
@@ -20,6 +16,10 @@ const PRESETS = [
   {
     name: '⛰️ Jagged Peaks',
     config: { octaves: 5, persistence: 0.6, scale: 28, redistribution: 1.9, applyIslandMask: 'none' as const, islandRadius: 64 },
+  },
+  {
+    name: '🌟 Volcanic Archipelago',
+    config: { octaves: 5, persistence: 0.55, scale: 35, redistribution: 1.5, applyIslandMask: 'archipelago' as const, islandRadius: 80 },
   },
 ];
 
@@ -60,6 +60,12 @@ function App() {
     visibleLayers,
     toggleLayer,
     sandboxActiveChunk,
+    showMapHUD,
+    showRecenterButton,
+    sidebarCollapsed,
+    setShowMapHUD,
+    setShowRecenterButton,
+    setSidebarCollapsed,
   } = useWorldStore();
 
   const MAP_VIEWS = [
@@ -103,7 +109,9 @@ function App() {
   return (
     <div className="flex w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
       {/* Sidebar for settings and parameters */}
-      <aside className="w-80 flex flex-col bg-slate-900 border-r border-slate-800 shrink-0 h-full shadow-2xl z-20">
+      <aside className={`flex flex-col bg-slate-900 border-r border-slate-800 shrink-0 h-full shadow-2xl z-20 transition-all duration-300 ${
+        sidebarCollapsed ? 'w-0 border-none overflow-hidden' : 'w-80'
+      }`}>
         {/* Sidebar Header */}
         <header className="p-5 border-b border-slate-800 bg-slate-900/50">
           <div className="flex items-center gap-2">
@@ -196,6 +204,28 @@ function App() {
             {layersExpanded && (
               <div className="flex flex-col gap-2.5 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/85 backdrop-blur-md shadow-2xl transition-all duration-300">
                 
+                {/* RPG Textures Toggle */}
+                <div className="flex items-center justify-between text-xs text-slate-355 hover:text-slate-100 transition-colors">
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm">👾</span>
+                    <span>RPG Texture Pack</span>
+                  </span>
+                  <button
+                    onClick={() => toggleLayer('textures')}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      visibleLayers.textures 
+                        ? 'bg-indigo-600/35 border-indigo-500/80 shadow-[0_0_10px_rgba(99,102,241,0.25)]' 
+                        : 'bg-slate-850 border-slate-805'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-100 shadow transition duration-200 ease-in-out ${
+                        visibleLayers.textures ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 {/* Terrain Layer Toggle */}
                 <div className="flex items-center justify-between text-xs text-slate-355 hover:text-slate-100 transition-colors">
                   <span className="flex items-center gap-2">
@@ -396,11 +426,15 @@ function App() {
                   <span className="truncate">Arid Desert</span>
                 </div>
                 <div className="flex items-center gap-1.5 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/30">
-                  <span className="w-2.5 h-2.5 rounded bg-[#6B7280] shrink-0" />
-                  <span className="truncate">Mountains</span>
+                  <span className="w-2.5 h-2.5 rounded bg-[#8B5E3C] shrink-0" />
+                  <span className="truncate">Hills</span>
                 </div>
                 <div className="flex items-center gap-1.5 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/30">
                   <span className="w-2.5 h-2.5 rounded bg-[#F3F4F6] shrink-0" />
+                  <span className="truncate">Mountains</span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/30">
+                  <span className="w-2.5 h-2.5 rounded bg-[#FFFFFF] shrink-0 border border-slate-800" />
                   <span className="truncate">Snowy Peaks</span>
                 </div>
                 <div className="flex items-center gap-1.5 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/30 col-span-2">
@@ -477,7 +511,7 @@ function App() {
               <input
                 type="range"
                 min="10"
-                max="120"
+                max="600"
                 step="1"
                 value={scale}
                 onChange={(e) => {
@@ -569,6 +603,56 @@ function App() {
             </div>
 
           </section>
+
+          {/* Interface HUD Preferences (Step 18) */}
+          <section className="flex flex-col gap-2.5 bg-slate-950/30 p-3.5 rounded-xl border border-slate-800/80">
+            <label className="text-xs font-bold tracking-wider text-slate-400 uppercase">HUD Preferences</label>
+            <div className="flex flex-col gap-2.5">
+              {/* Toggle Recenter Button */}
+              <div className="flex items-center justify-between text-xs text-slate-300 hover:text-slate-100 transition-colors">
+                <span className="flex items-center gap-2">
+                  <span className="text-sm">🎯</span>
+                  <span>Recenter Button</span>
+                </span>
+                <button
+                  onClick={() => setShowRecenterButton(!showRecenterButton)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    showRecenterButton 
+                      ? 'bg-indigo-600/35 border-indigo-500/80 shadow-[0_0_10px_rgba(99,102,241,0.25)]' 
+                      : 'bg-slate-850 border-slate-805'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-100 shadow transition duration-200 ease-in-out ${
+                      showRecenterButton ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Toggle Map Viewport HUD */}
+              <div className="flex items-center justify-between text-xs text-slate-300 hover:text-slate-100 transition-colors">
+                <span className="flex items-center gap-2">
+                  <span className="text-sm">👁️</span>
+                  <span>Interactive Map HUD</span>
+                </span>
+                <button
+                  onClick={() => setShowMapHUD(!showMapHUD)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    showMapHUD 
+                      ? 'bg-indigo-600/35 border-indigo-500/80 shadow-[0_0_10px_rgba(99,102,241,0.25)]' 
+                      : 'bg-slate-850 border-slate-805'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-100 shadow transition duration-200 ease-in-out ${
+                      showMapHUD ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
         
 
@@ -585,6 +669,57 @@ function App() {
 
       {/* Main Canvas Viewport */}
       <main className="flex-1 h-full relative overflow-hidden bg-slate-950">
+        {/* Floating Toolbar (Step 18 Toggle Menu & Standalone Recenter Camera) */}
+        <div className="absolute top-4 left-4 z-30 flex gap-2 pointer-events-auto select-none">
+          {/* Menu Toggle */}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="px-3.5 py-2.5 bg-slate-900/90 hover:bg-slate-850/95 active:bg-slate-800/95 text-slate-100 border border-slate-800/80 rounded-xl shadow-2xl transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] text-xs font-bold font-sans"
+            title={sidebarCollapsed ? "Expand Settings Menu" : "Collapse Settings Menu"}
+          >
+            <span>{sidebarCollapsed ? '➡️' : '⬅️'}</span>
+            <span>{sidebarCollapsed ? 'Show Menu' : 'Hide Menu'}</span>
+          </button>
+
+          {/* Standalone Recenter Camera Button */}
+          {showRecenterButton && (
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('recenter-camera'));
+              }}
+              className="px-3.5 py-2.5 bg-slate-900/90 hover:bg-slate-850/95 active:bg-slate-800/95 text-indigo-300 border border-slate-800/80 rounded-xl shadow-2xl transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] text-xs font-bold font-sans"
+              title="Recenter World Map Camera"
+            >
+              <span>🎯</span>
+              <span>Recenter</span>
+            </button>
+          )}
+
+          {/* Zoom In Button */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('zoom-in'));
+            }}
+            className="px-3.5 py-2.5 bg-slate-900/90 hover:bg-slate-850/95 active:bg-slate-800/95 text-emerald-400 border border-slate-800/80 rounded-xl shadow-2xl transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] text-xs font-bold font-sans"
+            title="Zoom In"
+          >
+            <span>➕</span>
+            <span>Zoom In</span>
+          </button>
+
+          {/* Zoom Out Button */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('zoom-out'));
+            }}
+            className="px-3.5 py-2.5 bg-slate-900/90 hover:bg-slate-850/95 active:bg-slate-800/95 text-rose-400 border border-slate-800/80 rounded-xl shadow-2xl transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.15)] text-xs font-bold font-sans"
+            title="Zoom Out"
+          >
+            <span>➖</span>
+            <span>Zoom Out</span>
+          </button>
+        </div>
+
         <WorldCanvas />
         <TileInspector />
       </main>

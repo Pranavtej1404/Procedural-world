@@ -593,7 +593,7 @@ function assignNPCSchedules(npc: NPC, tiles: Tile[][], chunkSize: number): NPC {
             works.push({ lx, ly, dist: dist + 6 });
           }
         } else if (npc.role === 'Worker') {
-          if (tile.terrainType === 'forest' || tile.terrainType === 'mountain') {
+          if (tile.terrainType === 'forest' || tile.terrainType === 'mountain' || tile.terrainType === 'hills') {
             works.push({ lx, ly, dist });
           }
         } else if (npc.role === 'Explorer') {
@@ -1062,7 +1062,7 @@ export const ChunkSandboxView: React.FC = () => {
                       } else if (npc.role === 'Worker') {
                         if (currentTile?.terrainType === 'forest') {
                           thought = 'Felling trees and gathering timber... 🪓';
-                        } else if (currentTile?.terrainType === 'mountain') {
+                        } else if (currentTile?.terrainType === 'mountain' || currentTile?.terrainType === 'hills') {
                           thought = 'Mining iron and prospecting gold... ⛏️';
                         } else {
                           thought = 'Doing manual labor... 🔨';
@@ -1174,7 +1174,7 @@ export const ChunkSandboxView: React.FC = () => {
                     } else if (npc.role === 'Worker') {
                       if (currentTile?.terrainType === 'forest') {
                         thought = 'Felling trees and gathering timber... 🪓';
-                      } else if (currentTile?.terrainType === 'mountain') {
+                      } else if (currentTile?.terrainType === 'mountain' || currentTile?.terrainType === 'hills') {
                         thought = 'Mining iron and prospecting gold... ⛏️';
                       } else {
                         thought = 'Doing manual labor... 🔨';
@@ -1192,7 +1192,7 @@ export const ChunkSandboxView: React.FC = () => {
                     if (currentTile) {
                       if (currentTile.terrainType === 'forest') {
                         thought = 'Harvesting fresh timber... 🪵';
-                      } else if (currentTile.terrainType === 'mountain') {
+                      } else if (currentTile.terrainType === 'mountain' || currentTile.terrainType === 'hills') {
                         thought = 'Prospecting mineral deposits... 🪙';
                       } else if (currentTile.terrainType === 'beach') {
                         thought = 'Looking for shiny seashells... 🐚';
@@ -1419,10 +1419,12 @@ export const ChunkSandboxView: React.FC = () => {
         return 'bg-gradient-to-br from-emerald-700 to-green-800';
       case 'desert':
         return 'bg-gradient-to-br from-amber-400 to-orange-400';
+      case 'hills':
+        return 'bg-gradient-to-br from-amber-800 to-amber-950 text-amber-200';
       case 'mountain':
-        return 'bg-gradient-to-br from-slate-500 to-zinc-600';
+        return 'bg-gradient-to-br from-slate-100 to-zinc-200 text-slate-900';
       case 'snow':
-        return 'bg-gradient-to-br from-slate-100 to-white';
+        return 'bg-gradient-to-br from-white to-slate-100 text-slate-950';
       case 'river':
         return 'bg-gradient-to-br from-cyan-400 to-sky-500';
       default:
@@ -1826,7 +1828,7 @@ export const ChunkSandboxView: React.FC = () => {
                 const hasRuins = tile.structure === 'ruins';
                 const hasObelisk = tile.structure === 'obelisk';
                 const hasRoad = tile.hasRoad;
-                const hasMinerals = tile.terrainType === 'mountain' && (Math.abs(Math.sin(lx * 12.9 + ly * 78.2) * 100) % 10 < 3);
+                const hasMinerals = (tile.terrainType === 'mountain' || tile.terrainType === 'hills') && (Math.abs(Math.sin(lx * 12.9 + ly * 78.2) * 100) % 10 < 3);
                 const hasTavern = tile.structure === 'tavern';
                 const hasFarm = tile.structure === 'farm';
 

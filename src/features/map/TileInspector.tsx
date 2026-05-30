@@ -40,10 +40,16 @@ const BIOME_DETAILS: Record<TerrainType, { label: string; emoji: string; color: 
     color: 'from-amber-500 to-orange-600',
     desc: 'Dunes stretching to the horizon, baking in the heat.'
   },
+  hills: {
+    label: 'Hills',
+    emoji: '⛰️',
+    color: 'from-amber-800 to-amber-950 text-amber-200',
+    desc: 'Gentle, clay-rich rising slopes with rolling trails.'
+  },
   mountain: { 
     label: 'Mountains', 
     emoji: '🏔️', 
-    color: 'from-slate-600 to-zinc-800',
+    color: 'from-slate-100 to-zinc-200 text-slate-900', // Snowy white/light gray background
     desc: 'Soaring rock structures rich in mineral ores.'
   },
   snow: { 

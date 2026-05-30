@@ -1,4 +1,4 @@
-export type TerrainType = 'deep_water' | 'water' | 'beach' | 'grass' | 'forest' | 'desert' | 'mountain' | 'snow' | 'river';
+export type TerrainType = 'deep_water' | 'water' | 'beach' | 'grass' | 'forest' | 'desert' | 'hills' | 'mountain' | 'snow' | 'river';
 
 export interface TerrainConfig {
   type: TerrainType;
@@ -35,34 +35,41 @@ export const TERRAIN_CONFIGS: Record<TerrainType, TerrainConfig> = {
     label: 'Grasslands',
     color: 0x10B981, // Emerald Green
     hexColor: '#10B981',
-    threshold: 0.80,
+    threshold: 0.70,
   },
   forest: {
     type: 'forest',
     label: 'Forest',
     color: 0x047857, // Dark Green
     hexColor: '#047857',
-    threshold: 0.80,
+    threshold: 0.70,
   },
   desert: {
     type: 'desert',
     label: 'Desert',
     color: 0xF59E0B, // Golden Orange
     hexColor: '#F59E0B',
-    threshold: 0.80,
+    threshold: 0.70,
+  },
+  hills: {
+    type: 'hills',
+    label: 'Hills',
+    color: 0x8B5E3C, // Warm clay brown
+    hexColor: '#8B5E3C',
+    threshold: 0.85,
   },
   mountain: {
     type: 'mountain',
     label: 'Mountains',
-    color: 0x6B7280, // Gray
-    hexColor: '#6B7280',
-    threshold: 0.88,
+    color: 0xF3F4F6, // White
+    hexColor: '#F3F4F6',
+    threshold: 0.92,
   },
   snow: {
     type: 'snow',
     label: 'Snowy Peaks',
-    color: 0xF3F4F6, // White
-    hexColor: '#F3F4F6',
+    color: 0xFFFFFF, // Pure White
+    hexColor: '#FFFFFF',
     threshold: 1.0,
   },
   river: {
@@ -91,15 +98,20 @@ export const getBiomeType = (
   if (elevation < 0.43) return TERRAIN_CONFIGS.beach;
 
   // 3. Mountain/Peaks Biomes
-  if (elevation >= 0.80) {
+  if (elevation >= 0.85) {
     // If extremely high elevation, or high elevation + cold temperature -> snowy peaks
-    if (elevation >= 0.88 || temperature < 0.40) {
+    if (elevation >= 0.92 || temperature < 0.40) {
       return TERRAIN_CONFIGS.snow;
     }
     return TERRAIN_CONFIGS.mountain;
   }
 
-  // 4. Land Biomes (0.43 <= elevation < 0.80)
+  // 4. Hills Biome (0.70 <= elevation < 0.85)
+  if (elevation >= 0.70) {
+    return TERRAIN_CONFIGS.hills;
+  }
+
+  // 5. Land Biomes (0.43 <= elevation < 0.70)
   // Low moisture + hot temperature -> arid desert
   if (moisture < 0.35 && temperature > 0.65) {
     return TERRAIN_CONFIGS.desert;

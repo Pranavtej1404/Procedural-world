@@ -2,9 +2,77 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Application, Container, Sprite, Texture, Graphics } from 'pixi.js';
 import { useWorldStore } from '../../app/store/useWorldStore';
 import { ViewportController } from '../../core/engine/ViewportController';
-import { generateChunk } from '../generation/terrainGenerator';
+import { generateChunk, getTileTerrainAt } from '../generation/terrainGenerator';
 import type { Tile } from '../generation/terrainGenerator';
 import { getResourcesForBiome } from '../../core/world/resources';
+
+const saveToLocalStorage = (key: string, dataStr: string) => {
+  try {
+    localStorage.setItem(key, dataStr);
+    
+    // Keep total pworld_chunk_ items under 400
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('pworld_chunk_')) {
+        keys.push(k);
+      }
+    }
+    if (keys.length > 400) {
+      const excess = keys.slice(0, keys.length - 300);
+      excess.forEach(k => localStorage.removeItem(k));
+      console.log(`Evicted ${excess.length} chunks from LocalStorage to keep size bounded.`);
+    }
+  } catch (e) {
+    console.warn('LocalStorage error, clearing all chunks from other settings/seeds first...');
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('pworld_chunk_') && k !== key) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    try {
+      localStorage.setItem(key, dataStr);
+    } catch (err) {
+      console.error('Could not save chunk to localStorage even after full clear:', err);
+    }
+  }
+};
+
+const cleanupLegacyLocalStorage = (
+  currentSeed: string,
+  octs: number,
+  pers: number,
+  lacu: number,
+  nScale: number,
+  redis: number,
+  islandMask: string,
+  iRadius: number,
+  genVer: number
+) => {
+  try {
+    const currentPrefix = `pworld_chunk_v2_${currentSeed}_${octs}_${pers}_${lacu}_${nScale}_${redis}_${islandMask}_${iRadius}_${genVer}_`;
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        if (key.startsWith('pworld_chunk_') && !key.startsWith('pworld_chunk_v2_')) {
+          keysToRemove.push(key);
+        } else if (key.startsWith('pworld_chunk_v2_') && !key.startsWith(currentPrefix)) {
+          keysToRemove.push(key);
+        }
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    if (keysToRemove.length > 0) {
+      console.log(`Cleaned up ${keysToRemove.length} stale localStorage chunks.`);
+    }
+  } catch (e) {
+    console.error('Error cleaning legacy localStorage:', e);
+  }
+};
 
 export const WorldCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -15,6 +83,52 @@ export const WorldCanvas: React.FC = () => {
 
   const [isReady, setIsReady] = useState(false);
   const [canvasError, setCanvasError] = useState<string | null>(null);
+
+  const [texturesLoaded, setTexturesLoaded] = useState(false);
+  const spritesheetRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+
+        // Background color at top-right (RGB 24, 22, 33)
+        const bgR = 24, bgG = 22, bgB = 33;
+        // Grass meadow base color in sheet (RGB 85, 122, 70)
+        const meadowR = 85, meadowG = 122, meadowB = 70;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+
+          // Chromakey dark background
+          const isBg = Math.abs(r - bgR) < 20 && Math.abs(g - bgG) < 20 && Math.abs(b - bgB) < 20;
+          if (isBg) {
+            data[i + 3] = 0;
+            continue;
+          }
+
+          // Chromakey the grass meadow background of the edges to transparent
+          const isMeadow = Math.abs(r - meadowR) < 30 && Math.abs(g - meadowG) < 30 && Math.abs(b - meadowB) < 30;
+          if (isMeadow) {
+            data[i + 3] = 0;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        spritesheetRef.current = canvas;
+        setTexturesLoaded(true);
+      }
+    };
+    img.src = '/hill_textures.png';
+  }, []);
 
   const {
     seed,
@@ -30,6 +144,7 @@ export const WorldCanvas: React.FC = () => {
     mapViewMode,
     generationVersion,
     visibleLayers,
+    showMapHUD,
   } = useWorldStore();
 
   const hoveredTile = useWorldStore((state) => state.hoveredTile);
@@ -46,6 +161,9 @@ export const WorldCanvas: React.FC = () => {
 
   // Cache of chunk Tile arrays to support tile selection lookups at 60fps
   const chunkTilesRef = useRef<Map<string, Tile[][]>>(new Map());
+
+  // Visible chunk boundary bounds for the asynchronous background pre-generator
+  const visibleBoundsRef = useRef({ minCX: 0, maxCX: 0, minCY: 0, maxCY: 0 });
 
   // Pixi containers & highlights
   const chunksContainerRef = useRef<Container | null>(null);
@@ -67,6 +185,7 @@ export const WorldCanvas: React.FC = () => {
     mapViewMode,
     visibleLayers,
     selectedTile,
+    generationVersion,
   });
 
   useEffect(() => {
@@ -84,6 +203,7 @@ export const WorldCanvas: React.FC = () => {
       mapViewMode,
       visibleLayers,
       selectedTile,
+      generationVersion,
     };
   }, [
     seed,
@@ -99,6 +219,7 @@ export const WorldCanvas: React.FC = () => {
     mapViewMode,
     visibleLayers,
     selectedTile,
+    generationVersion,
   ]);
 
   // Main rendering logic to load visible chunks and cull out-of-bounds chunks
@@ -122,6 +243,7 @@ export const WorldCanvas: React.FC = () => {
       mapViewMode: viewMode,
       visibleLayers: layers,
       selectedTile: selTile,
+      generationVersion: genVer,
     } = configRef.current;
 
     const selectedChunkX = selTile ? Math.floor(selTile.x / cSize) : null;
@@ -146,6 +268,9 @@ export const WorldCanvas: React.FC = () => {
     const minCY = Math.floor(worldTop / chunkPixelSize) - 1;
     const maxCY = Math.floor(worldBottom / chunkPixelSize) + 1;
 
+    // Update the ref to track visible bounds for background pre-generation
+    visibleBoundsRef.current = { minCX, maxCX, minCY, maxCY };
+
     const now = Date.now();
     const chunkCache = loadedChunksRef.current;
 
@@ -163,20 +288,86 @@ export const WorldCanvas: React.FC = () => {
             chunksContainer.addChild(cached.sprite);
           }
         } else {
-           // Generate new chunk
-           const tiles = generateChunk({
-             chunkX: cx,
-             chunkY: cy,
-             chunkSize: cSize,
-             seed: currentSeed,
-             octaves: octs,
-             persistence: pers,
-             lacunarity: lacu,
-             scale: nScale,
-             redistribution: redis,
-             applyIslandMask: islandMask,
-             islandRadius: iRadius,
-           });
+           // Read chunk from persistent cache or generate new chunk
+           let tiles: Tile[][];
+           const prefix = `pworld_chunk_v2_${currentSeed}_${octs}_${pers}_${lacu}_${nScale}_${redis}_${islandMask}_${iRadius}_${genVer}_`;
+           const cacheKey = `${prefix}${cx}_${cy}`;
+           const cachedData = localStorage.getItem(cacheKey);
+
+           if (cachedData) {
+             try {
+               const compressed = JSON.parse(cachedData);
+               tiles = compressed.map((row: any, lx: number) => row.map((c: any, ly: number) => {
+                 const wx = cx * cSize + lx;
+                 const wy = cy * cSize + ly;
+                 const tile: Tile = {
+                   x: wx,
+                   y: wy,
+                   height: c.e,
+                   elevation: c.e,
+                   moisture: c.m,
+                   temperature: c.t,
+                   terrainType: c.ty,
+                   baseTerrainType: c.bt || c.ty,
+                 };
+                 if (c.s) tile.structure = c.s;
+                 if (c.d) tile.district = c.d;
+                 if (c.r) {
+                   tile.hasRoad = true;
+                   if (c.rt) tile.roadType = c.rt;
+                 }
+                 return tile;
+               }));
+             } catch (err) {
+               console.error('Failed to parse cached chunk data, regenerating...', err);
+               tiles = generateChunk({
+                 chunkX: cx,
+                 chunkY: cy,
+                 chunkSize: cSize,
+                 seed: currentSeed,
+                 octaves: octs,
+                 persistence: pers,
+                 lacunarity: lacu,
+                 scale: nScale,
+                 redistribution: redis,
+                 applyIslandMask: islandMask,
+                 islandRadius: iRadius,
+               });
+             }
+           } else {
+             tiles = generateChunk({
+               chunkX: cx,
+               chunkY: cy,
+               chunkSize: cSize,
+               seed: currentSeed,
+               octaves: octs,
+               persistence: pers,
+               lacunarity: lacu,
+               scale: nScale,
+               redistribution: redis,
+               applyIslandMask: islandMask,
+               islandRadius: iRadius,
+             });
+
+             // Compress and store in localStorage
+             const compressed = tiles.map(row => row.map(tile => {
+               const c: any = {
+                 e: parseFloat(tile.elevation.toFixed(3)),
+                 m: parseFloat(tile.moisture.toFixed(3)),
+                 t: parseFloat(tile.temperature.toFixed(3)),
+                 ty: tile.terrainType
+               };
+               if (tile.baseTerrainType !== tile.terrainType) c.bt = tile.baseTerrainType;
+               if (tile.structure) c.s = tile.structure;
+               if (tile.district) c.d = tile.district;
+               if (tile.hasRoad) {
+                 c.r = 1;
+                 if (tile.roadType) c.rt = tile.roadType;
+               }
+               return c;
+             }));
+             saveToLocalStorage(cacheKey, JSON.stringify(compressed));
+           }
 
            // Cache tile data for interaction lookups
            chunkTilesRef.current.set(chunkKey, tiles);
@@ -247,7 +438,8 @@ export const WorldCanvas: React.FC = () => {
                       const grassland = { r: 16, g: 185, b: 129 };
                       const forest = { r: 4, g: 120, b: 87 };
                       const desert = { r: 245, g: 158, b: 11 };
-                      const mountain = { r: 107, g: 114, b: 128 };
+                      const hills = { r: 139, g: 94, b: 60 }; // Warm clay brown foothills
+                      const mountain = { r: 243, g: 244, b: 246 }; // White mountain peaks
                       const snow = { r: 243, g: 244, b: 246 };
 
                       if (targetType === 'deep_water') {
@@ -262,6 +454,8 @@ export const WorldCanvas: React.FC = () => {
                         r = forest.r; g = forest.g; b = forest.b;
                       } else if (targetType === 'desert') {
                         r = desert.r; g = desert.g; b = desert.b;
+                      } else if (targetType === 'hills') {
+                        r = hills.r; g = hills.g; b = hills.b;
                       } else if (targetType === 'mountain') {
                         r = mountain.r; g = mountain.g; b = mountain.b;
                       } else if (targetType === 'snow') {
@@ -302,13 +496,20 @@ export const WorldCanvas: React.FC = () => {
                           b = Math.round(beach.b * (1 - t) + landB * t);
                         } else if (E < 0.70) {
                           r = Math.round(landR); g = Math.round(landG); b = Math.round(landB);
-                        } else if (E < 0.80) {
-                          const t = (E - 0.70) / 0.10;
-                          r = Math.round(landR * (1 - t) + mountain.r * t);
-                          g = Math.round(landG * (1 - t) + mountain.g * t);
-                          b = Math.round(landB * (1 - t) + mountain.b * t);
+                        } else if (E < 0.74) {
+                          const t = (E - 0.70) / 0.04;
+                          r = Math.round(landR * (1 - t) + hills.r * t);
+                          g = Math.round(landG * (1 - t) + hills.g * t);
+                          b = Math.round(landB * (1 - t) + hills.b * t);
+                        } else if (E < 0.82) {
+                          r = hills.r; g = hills.g; b = hills.b;
+                        } else if (E < 0.85) {
+                          const t = (E - 0.82) / 0.03;
+                          r = Math.round(hills.r * (1 - t) + mountain.r * t);
+                          g = Math.round(hills.g * (1 - t) + mountain.g * t);
+                          b = Math.round(hills.b * (1 - t) + mountain.b * t);
                         } else {
-                          const sElev = Math.min(1, Math.max(0, (E - 0.80) / 0.08));
+                          const sElev = Math.min(1, Math.max(0, (E - 0.85) / 0.12));
                           const sCold = Math.min(1, Math.max(0, (0.45 - T) / 0.15));
                           const s = Math.max(sElev, sCold);
                           
@@ -323,6 +524,86 @@ export const WorldCanvas: React.FC = () => {
                 
                 ctx.fillStyle = `rgb(${r},${g},${b})`;
                 ctx.fillRect(lx * tSize, ly * tSize, tSize, tSize);
+
+                // --- PROCEDURAL RPG TEXTURE PACK ---
+                if (layers.textures && viewMode === 'biomes' && (drawTerrain || (drawRivers && isRiver))) {
+                  const tx = tile.x;
+                  const ty = tile.y;
+                  const x = lx * tSize;
+                  const y = ly * tSize;
+                  const activeType = isRiver ? tile.baseTerrainType : tile.terrainType;
+
+                  // Deterministic pseudo-random seed hash for the tile
+                  const hash = Math.abs(Math.sin(tx * 12.9898 + ty * 78.233) * 43758.5453) % 1;
+
+                  if (isRiver && drawRivers) {
+                    // River flowing water current ripples
+                    if (hash < 0.25) {
+                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                      ctx.lineWidth = 1;
+                      ctx.beginPath();
+                      ctx.moveTo(x + tSize * 0.2, y + tSize * 0.5);
+                      ctx.lineTo(x + tSize * 0.8, y + tSize * 0.5);
+                      ctx.stroke();
+                    }
+                  } else if (activeType === 'grass') {
+                    // Cute grass blades or clovers
+                    if (hash < 0.20) {
+                      ctx.strokeStyle = '#047857'; // Darker forest green
+                      ctx.lineWidth = 1.5;
+                      ctx.beginPath();
+                      ctx.moveTo(x + tSize * 0.3, y + tSize * 0.7);
+                      ctx.lineTo(x + tSize * 0.35, y + tSize * 0.45);
+                      ctx.moveTo(x + tSize * 0.5, y + tSize * 0.75);
+                      ctx.lineTo(x + tSize * 0.45, y + tSize * 0.35);
+                      ctx.moveTo(x + tSize * 0.65, y + tSize * 0.7);
+                      ctx.lineTo(x + tSize * 0.72, y + tSize * 0.5);
+                      ctx.stroke();
+                    } else if (hash < 0.32) {
+                      // Small yellow flower
+                      ctx.fillStyle = '#FBBF24'; // Yellow
+                      ctx.beginPath();
+                      ctx.arc(x + tSize * 0.5, y + tSize * 0.5, 2, 0, Math.PI * 2);
+                      ctx.fill();
+                      ctx.strokeStyle = '#047857';
+                      ctx.lineWidth = 1;
+                      ctx.beginPath();
+                      ctx.moveTo(x + tSize * 0.5, y + tSize * 0.5);
+                      ctx.lineTo(x + tSize * 0.5, y + tSize * 0.85);
+                      ctx.stroke();
+                    }
+                  } else if (activeType === 'desert') {
+                    // Elegant sand ripples
+                    ctx.strokeStyle = '#D97706'; // Dark amber
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    if (hash < 0.5) {
+                      ctx.moveTo(x + tSize * 0.15, y + tSize * 0.4);
+                      ctx.quadraticCurveTo(x + tSize * 0.4, y + tSize * 0.25, x + tSize * 0.65, y + tSize * 0.4);
+                    } else {
+                      ctx.moveTo(x + tSize * 0.35, y + tSize * 0.7);
+                      ctx.quadraticCurveTo(x + tSize * 0.6, y + tSize * 0.55, x + tSize * 0.85, y + tSize * 0.7);
+                    }
+                    ctx.stroke();
+                  } else if (activeType === 'beach') {
+                    // Grains of sand details
+                    if (hash < 0.35) {
+                      ctx.fillStyle = '#D97706'; // Golden amber
+                      ctx.fillRect(x + tSize * 0.3, y + tSize * 0.45, 1.5, 1.5);
+                      ctx.fillRect(x + tSize * 0.68, y + tSize * 0.65, 1.5, 1.5);
+                    }
+                  } else if (activeType === 'water' || activeType === 'deep_water') {
+                    // White Crest waves
+                    if (hash < 0.12) {
+                      ctx.strokeStyle = activeType === 'deep_water' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.25)';
+                      ctx.lineWidth = 1;
+                      ctx.beginPath();
+                      ctx.moveTo(x + tSize * 0.2, y + tSize * 0.5);
+                      ctx.quadraticCurveTo(x + tSize * 0.35, y + tSize * 0.4, x + tSize * 0.5, y + tSize * 0.5);
+                      ctx.stroke();
+                    }
+                  }
+                }
 
                 // --- ROAD RENDERING ---
                 if (layers.roads && tile.hasRoad) {
@@ -835,6 +1116,93 @@ export const WorldCanvas: React.FC = () => {
               }
             }
 
+            // --- TILE EDGE TRANSITIONS & CLIFFS OVERLAY (autotiling) ---
+            if (texturesLoaded && spritesheetRef.current && layers.textures && viewMode === 'biomes') {
+              const sheet = spritesheetRef.current;
+              for (let lx = 0; lx < cSize; lx++) {
+                for (let ly = 0; ly < cSize; ly++) {
+                  const tile = tiles[lx][ly];
+                  const activeType = tile.terrainType === 'river' ? tile.baseTerrainType : tile.terrainType;
+
+                  if (activeType === 'hills') {
+                    // Helper to get neighbor biome types
+                    const getNeighborType = (dx: number, dy: number): TerrainType => {
+                      const nx = lx + dx;
+                      const ny = ly + dy;
+                      if (nx >= 0 && nx < cSize && ny >= 0 && ny < cSize) {
+                        const nTile = tiles[nx][ny];
+                        return nTile.terrainType === 'river' ? nTile.baseTerrainType : nTile.terrainType;
+                      }
+                      const { terrainType } = getTileTerrainAt(tile.x + dx, tile.y + dy, currentSeed, {
+                        octaves: octs,
+                        persistence: pers,
+                        lacunarity: lacu,
+                        scale: nScale,
+                        redistribution: redis,
+                        applyIslandMask: islandMask,
+                        islandRadius: iRadius,
+                      });
+                      return terrainType;
+                    };
+
+                    const nNotHill = getNeighborType(0, -1) !== 'hills';
+                    const sNotHill = getNeighborType(0, 1) !== 'hills';
+                    const wNotHill = getNeighborType(-1, 0) !== 'hills';
+                    const eNotHill = getNeighborType(1, 0) !== 'hills';
+
+                    const tx = lx * tSize;
+                    const ty = ly * tSize;
+
+                    // 1. South Cliff descend (overlapping down into the tile below)
+                    if (sNotHill) {
+                      // Cliff Face (Column 1): x = 733, y = 259, w = 26, h = 54 -> scaled to fit tSize
+                      ctx.drawImage(sheet, 733, 259, 26, 54, tx, ty + tSize, tSize, tSize);
+                      // Cliff Bottom details: x = 733, y = 313, w = 26, h = 20 -> scaled to fit tSize
+                      ctx.drawImage(sheet, 733, 313, 26, 20, tx, ty + tSize * 1.5, tSize, tSize * 0.4);
+                    }
+
+                    // 2. North Edge Transition (meadow top border)
+                    if (nNotHill) {
+                      // Grid 2 Row 1 Col 2: x = 414, y = 254, w = 58, h = 55
+                      ctx.drawImage(sheet, 414, 254, 58, 55, tx, ty, tSize, tSize);
+                    }
+
+                    // 3. West Edge Transition (left slope)
+                    if (wNotHill) {
+                      // Grid 2 Row 2 Col 1: x = 356, y = 309, w = 58, h = 55
+                      ctx.drawImage(sheet, 356, 309, 58, 55, tx, ty, tSize, tSize);
+                    }
+
+                    // 4. East Edge Transition (right slope)
+                    if (eNotHill) {
+                      // Grid 2 Row 2 Col 3: x = 472, y = 309, w = 58, h = 55
+                      ctx.drawImage(sheet, 472, 309, 58, 55, tx, ty, tSize, tSize);
+                    }
+
+                    // 5. Corners
+                    if (nNotHill && wNotHill) {
+                      // Top-Left corner: Grid 2 Row 1 Col 1: x = 356, y = 254, w = 58, h = 55
+                      ctx.drawImage(sheet, 356, 254, 58, 55, tx, ty, tSize, tSize);
+                    }
+                    if (nNotHill && eNotHill) {
+                      // Top-Right corner: Grid 2 Row 1 Col 3: x = 472, y = 254, w = 58, h = 55
+                      ctx.drawImage(sheet, 472, 254, 58, 55, tx, ty, tSize, tSize);
+                    }
+
+                    // Little random details (stumps, stones) placed deterministically
+                    const hash = Math.abs(Math.sin(tile.x * 12.9898 + tile.y * 78.233) * 43758.5453) % 1;
+                    if (hash < 0.08) {
+                      // Stump: x = 902, y = 264, w = 41, h = 41
+                      ctx.drawImage(sheet, 902, 264, 41, 41, tx + tSize * 0.15, ty + tSize * 0.15, tSize * 0.7, tSize * 0.7);
+                    } else if (hash < 0.16) {
+                      // Stone piles: x = 880, y = 114, w = 32, h = 25
+                      ctx.drawImage(sheet, 880, 114, 32, 25, tx + tSize * 0.2, ty + tSize * 0.3, tSize * 0.6, tSize * 0.5);
+                    }
+                  }
+                }
+              }
+            }
+
             // Draw resources if toggled on and this is the selected chunk containing the clicked tile
             const isSelectedChunk = selTile !== null && cx === selectedChunkX && cy === selectedChunkY;
             if (layers.resources && isSelectedChunk) {
@@ -995,6 +1363,7 @@ export const WorldCanvas: React.FC = () => {
 
     let isMounted = true;
     let app: Application | null = null;
+    let frameId: number | null = null;
 
     const initPixi = async () => {
       try {
@@ -1042,7 +1411,14 @@ export const WorldCanvas: React.FC = () => {
         const viewportController = new ViewportController(
           worldContainer,
           app.canvas,
-          () => { loadVisibleChunksRef.current(); }
+          () => {
+            if (frameId === null) {
+              frameId = requestAnimationFrame(() => {
+                loadVisibleChunksRef.current();
+                frameId = null;
+              });
+            }
+          }
         );
         viewportControllerRef.current = viewportController;
 
@@ -1059,6 +1435,9 @@ export const WorldCanvas: React.FC = () => {
 
     return () => {
       isMounted = false;
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
       if (viewportControllerRef.current) {
         viewportControllerRef.current.destroy();
       }
@@ -1116,7 +1495,126 @@ export const WorldCanvas: React.FC = () => {
     
     // Preserves the camera viewport zoom/pan and simply loads new chunks at current view
     loadVisibleChunks();
-  }, [generationVersion, isReady, selectedTile]);
+  }, [generationVersion, isReady, selectedTile, texturesLoaded]);
+
+  // Clean up legacy localStorage caches when the configuration changes
+  useEffect(() => {
+    cleanupLegacyLocalStorage(seed, octaves, persistence, lacunarity, noiseScale, redistribution, applyIslandMask, islandRadius, generationVersion);
+  }, [seed, octaves, persistence, lacunarity, noiseScale, redistribution, applyIslandMask, islandRadius, generationVersion]);
+
+  // Non-blocking asynchronous border chunk pre-generator background thread
+  useEffect(() => {
+    if (!isReady) return;
+
+    let timeoutId: any = null;
+    let active = true;
+
+    const pregenerateLoop = () => {
+      if (!active) return;
+
+      const { minCX, maxCX, minCY, maxCY } = visibleBoundsRef.current;
+      const {
+        seed: currentSeed,
+        chunkSize: cSize,
+        octaves: octs,
+        persistence: pers,
+        lacunarity: lacu,
+        noiseScale: nScale,
+        redistribution: redis,
+        applyIslandMask: islandMask,
+        islandRadius: iRadius,
+        generationVersion: genVer,
+      } = configRef.current;
+
+      // We pre-generate chunks in a 2-chunk buffer border around the viewport
+      const border = 2;
+      const bufferMinCX = minCX - border;
+      const bufferMaxCX = maxCX + border;
+      const bufferMinCY = minCY - border;
+      const bufferMaxCY = maxCY + border;
+
+      const prefix = `pworld_chunk_v2_${currentSeed}_${octs}_${pers}_${lacu}_${nScale}_${redis}_${islandMask}_${iRadius}_${genVer}_`;
+
+      let chunkToGenerate: { cx: number; cy: number } | null = null;
+
+      outerLoop:
+      for (let cx = bufferMinCX; cx <= bufferMaxCX; cx++) {
+        for (let cy = bufferMinCY; cy <= bufferMaxCY; cy++) {
+          // Skip if the chunk is already in the visible area
+          if (cx >= minCX && cx <= maxCX && cy >= minCY && cy <= maxCY) {
+            continue;
+          }
+
+          const chunkKey = `${cx},${cy}`;
+          const cacheKey = `${prefix}${cx}_${cy}`;
+
+          // Check if it is already in memory or localStorage cache
+          if (!chunkTilesRef.current.has(chunkKey) && !localStorage.getItem(cacheKey)) {
+            chunkToGenerate = { cx, cy };
+            break outerLoop;
+          }
+        }
+      }
+
+      if (chunkToGenerate) {
+        const { cx, cy } = chunkToGenerate;
+        
+        // Generate chunk in background
+        const tiles = generateChunk({
+          chunkX: cx,
+          chunkY: cy,
+          chunkSize: cSize,
+          seed: currentSeed,
+          octaves: octs,
+          persistence: pers,
+          lacunarity: lacu,
+          scale: nScale,
+          redistribution: redis,
+          applyIslandMask: islandMask,
+          islandRadius: iRadius,
+        });
+
+        // Cache tile data for interaction lookups
+        const chunkKey = `${cx},${cy}`;
+        chunkTilesRef.current.set(chunkKey, tiles);
+
+        // Compress and store in localStorage
+        const compressed = tiles.map(row => row.map(tile => {
+          const c: any = {
+            e: parseFloat(tile.elevation.toFixed(3)),
+            m: parseFloat(tile.moisture.toFixed(3)),
+            t: parseFloat(tile.temperature.toFixed(3)),
+            ty: tile.terrainType
+          };
+          if (tile.baseTerrainType !== tile.terrainType) c.bt = tile.baseTerrainType;
+          if (tile.structure) c.s = tile.structure;
+          if (tile.district) c.d = tile.district;
+          if (tile.hasRoad) {
+            c.r = 1;
+            if (tile.roadType) c.rt = tile.roadType;
+          }
+          return c;
+        }));
+
+        const cacheKey = `${prefix}${cx}_${cy}`;
+        saveToLocalStorage(cacheKey, JSON.stringify(compressed));
+
+        // Schedule next chunk pre-generation quickly
+        timeoutId = setTimeout(pregenerateLoop, 30);
+      } else {
+        // Nothing to pre-generate, wait and check again later
+        timeoutId = setTimeout(pregenerateLoop, 300);
+      }
+    };
+
+    // Initial delay before starting the pre-generator loop
+    timeoutId = setTimeout(pregenerateLoop, 500);
+
+    return () => {
+      active = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isReady, seed, octaves, persistence, lacunarity, noiseScale, redistribution, applyIslandMask, islandRadius]);
 
   // Center camera when container becomes visible and gets non-zero dimensions
   useEffect(() => {
@@ -1266,7 +1764,7 @@ export const WorldCanvas: React.FC = () => {
     };
   }, [selectedTile]);
 
-  // Listen for teleport events from floating inspector
+  // Listen for teleport and zoom events from floating inspector / toolbar
   useEffect(() => {
     const handleCenterOnTile = (e: Event) => {
       const customEvent = e as CustomEvent<{ x: number; y: number }>;
@@ -1296,13 +1794,70 @@ export const WorldCanvas: React.FC = () => {
       loadVisibleChunks();
     };
 
+    const handleZoomIn = () => {
+      const app = pixiAppRef.current;
+      const worldContainer = worldContainerRef.current;
+      if (!app || !worldContainer) return;
+
+      const canvasWidth = app.canvas.clientWidth;
+      const canvasHeight = app.canvas.clientHeight;
+      const mouseX = canvasWidth / 2;
+      const mouseY = canvasHeight / 2;
+
+      // Center the zoom on the center of the screen
+      const worldX = (mouseX - worldContainer.x) / worldContainer.scale.x;
+      const worldY = (mouseY - worldContainer.y) / worldContainer.scale.y;
+
+      let newScale = worldContainer.scale.x * 1.35;
+      newScale = Math.min(24.0, newScale);
+
+      worldContainer.scale.set(newScale);
+      worldContainer.x = mouseX - worldX * newScale;
+      worldContainer.y = mouseY - worldY * newScale;
+      loadVisibleChunks();
+    };
+
+    const handleZoomOut = () => {
+      const app = pixiAppRef.current;
+      const worldContainer = worldContainerRef.current;
+      if (!app || !worldContainer) return;
+
+      const canvasWidth = app.canvas.clientWidth;
+      const canvasHeight = app.canvas.clientHeight;
+      const mouseX = canvasWidth / 2;
+      const mouseY = canvasHeight / 2;
+
+      // Center the zoom on the center of the screen
+      const worldX = (mouseX - worldContainer.x) / worldContainer.scale.x;
+      const worldY = (mouseY - worldContainer.y) / worldContainer.scale.y;
+
+      let newScale = worldContainer.scale.x / 1.35;
+      newScale = Math.max(0.1, newScale);
+
+      worldContainer.scale.set(newScale);
+      worldContainer.x = mouseX - worldX * newScale;
+      worldContainer.y = mouseY - worldY * newScale;
+      loadVisibleChunks();
+    };
+
     window.addEventListener('center-on-tile', handleCenterOnTile);
+    
+    const handleRecenterEvent = () => {
+      handleRecenter();
+    };
+    window.addEventListener('recenter-camera', handleRecenterEvent);
+    window.addEventListener('zoom-in', handleZoomIn);
+    window.addEventListener('zoom-out', handleZoomOut);
+
     return () => {
       window.removeEventListener('center-on-tile', handleCenterOnTile);
+      window.removeEventListener('recenter-camera', handleRecenterEvent);
+      window.removeEventListener('zoom-in', handleZoomIn);
+      window.removeEventListener('zoom-out', handleZoomOut);
     };
   }, []);
 
-  const handleRecenter = () => {
+  function handleRecenter() {
     const worldContainer = worldContainerRef.current;
     const app = pixiAppRef.current;
     if (worldContainer && app) {
@@ -1315,7 +1870,7 @@ export const WorldCanvas: React.FC = () => {
       
       loadVisibleChunks();
     }
-  };
+  }
 
   if (canvasError) {
     return (
@@ -1335,27 +1890,29 @@ export const WorldCanvas: React.FC = () => {
   return (
     <div className="w-full h-full relative" ref={containerRef}>
       {/* HUD overlay for user interactions */}
-      <div className="absolute top-4 left-4 z-10 bg-slate-900/85 backdrop-blur-md border border-slate-800 p-4 rounded-xl shadow-2xl text-slate-100 flex flex-col gap-2 max-w-xs pointer-events-auto">
-        <h2 className="font-bold text-lg tracking-wide text-indigo-400">Interactive Map View</h2>
-        <div className="text-xs text-slate-400 font-mono">
-          <p>World: Infinite</p>
-          <p>Scale: {tileSize}px / tile</p>
-          <p>Format: {
-            applyIslandMask === 'none'
-              ? 'Infinite Continents'
-              : applyIslandMask === 'single'
-              ? 'Endless Central Island'
-              : 'Infinite Archipelago'
-          }</p>
-          {applyIslandMask === 'single' && <p>Island Radius: {islandRadius} tiles</p>}
+      {showMapHUD && (
+        <div className="absolute top-[72px] left-4 z-10 bg-slate-900/85 backdrop-blur-md border border-slate-800 p-4 rounded-xl shadow-2xl text-slate-100 flex flex-col gap-2 max-w-xs pointer-events-auto">
+          <h2 className="font-bold text-lg tracking-wide text-indigo-400">Interactive Map View</h2>
+          <div className="text-xs text-slate-400 font-mono">
+            <p>World: Infinite</p>
+            <p>Scale: {tileSize}px / tile</p>
+            <p>Format: {
+              applyIslandMask === 'none'
+                ? 'Infinite Continents'
+                : applyIslandMask === 'single'
+                ? 'Endless Central Island'
+                : 'Infinite Archipelago'
+            }</p>
+            {applyIslandMask === 'single' && <p>Island Radius: {islandRadius} tiles</p>}
+          </div>
+          <button
+            onClick={handleRecenter}
+            className="mt-3 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-lg font-medium text-sm transition-all duration-200 shadow-md cursor-pointer hover:shadow-indigo-500/20 text-center"
+          >
+            Recenter Camera
+          </button>
         </div>
-        <button
-          onClick={handleRecenter}
-          className="mt-3 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-lg font-medium text-sm transition-all duration-200 shadow-md cursor-pointer hover:shadow-indigo-500/20 text-center"
-        >
-          Recenter Camera
-        </button>
-      </div>
+      )}
 
       <div className="absolute bottom-4 right-4 z-10 bg-slate-900/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-700/40 text-[11px] text-slate-400 font-mono pointer-events-none select-none">
         Drag to Pan • Scroll to Zoom

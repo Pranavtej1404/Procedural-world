@@ -38,6 +38,11 @@ export const BIOME_RESOURCES: Record<TerrainType, Resource[]> = {
     { name: 'Crude Oil', emoji: '🛢️', rarity: 'Rare', description: 'Black gold bubbling beneath the sandstone layer.' },
     { name: 'Iron Sand', emoji: '🪙', rarity: 'Uncommon', description: 'Magnetite-rich mineral deposits.' }
   ],
+  hills: [
+    { name: 'Granite Stone', emoji: '🪨', rarity: 'Common', description: 'Tough volcanic rock ideal for fortressing and masoning.' },
+    { name: 'Copper Ore', emoji: '🪙', rarity: 'Common', description: 'Veins of high-grade raw copper ore ready for smelting.' },
+    { name: 'Clay Soil', emoji: '🧱', rarity: 'Uncommon', description: 'Rich clay sediment good for masonry and brick-making.' }
+  ],
   mountain: [
     { name: 'Granite Stone', emoji: '🪨', rarity: 'Common', description: 'Tough volcanic rock ideal for fortressing and masoning.' },
     { name: 'Iron Ore', emoji: '🪙', rarity: 'Common', description: 'Veins of high-grade raw iron ore ready for smelting.' },

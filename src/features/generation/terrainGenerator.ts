@@ -124,8 +124,13 @@ export function getTileTerrainAt(
 
   const rVal = riverNoise(wx / 32, wy / 32);
   const lVal = (lakeNoise(wx / 96, wy / 96) + 1) / 2;
+  const catchmentVal = (riverNoise(wx / 200, wy / 200) + 1) / 2;
+  const riverGating = Math.max(0, Math.min(1, (catchmentVal * 1.6) * (1.2 - Math.abs(elevation - 0.55))));
 
-  const pRiver = Math.max(0, Math.min(1, 1 - Math.abs(rVal) / 0.12));
+  const baseTRiver = 0.05 * Math.max(0, Math.min(1, (0.85 - elevation) / 0.45));
+  const tRiver = baseTRiver * riverGating;
+
+  const pRiver = Math.max(0, Math.min(1, 1 - Math.abs(rVal) / (tRiver * 2.5 + 0.01))) * riverGating;
   const pLake = Math.max(0, Math.min(1, (lVal - 0.55) / 0.09));
   const pWater = Math.max(pRiver, pLake);
   moisture = Math.min(1, moisture + pWater * 0.40);
@@ -141,9 +146,8 @@ export function getTileTerrainAt(
     terrainType = 'river';
   }
 
-  const tRiver = 0.045 * Math.max(0, Math.min(1, (0.78 - elevation) / 0.35));
   if (!isLake && Math.abs(rVal) < tRiver && elevation >= 0.38) {
-    elevation = 0.32 + 0.04 * Math.pow(Math.abs(rVal) / tRiver, 2);
+    elevation = 0.32 + 0.04 * Math.pow(Math.abs(rVal) / (tRiver + 0.001), 2);
     terrainType = 'river';
   }
 
@@ -260,9 +264,14 @@ export function generateChunk(options: ChunkGeneratorOptions): Tile[][] {
       // 1. Calculate River and Lake noises
       const rVal = riverNoise(wx / 32, wy / 32);
       const lVal = (lakeNoise(wx / 96, wy / 96) + 1) / 2;
+      const catchmentVal = (riverNoise(wx / 200, wy / 200) + 1) / 2;
+      const riverGating = Math.max(0, Math.min(1, (catchmentVal * 1.6) * (1.2 - Math.abs(elevation - 0.55))));
+
+      const baseTRiver = 0.05 * Math.max(0, Math.min(1, (0.85 - elevation) / 0.45));
+      const tRiver = baseTRiver * riverGating;
 
       // 2. Moisture Enrichment along riverbanks and lake shores (Riparian zones)
-      const pRiver = Math.max(0, Math.min(1, 1 - Math.abs(rVal) / 0.12));
+      const pRiver = Math.max(0, Math.min(1, 1 - Math.abs(rVal) / (tRiver * 2.5 + 0.01))) * riverGating;
       const pLake = Math.max(0, Math.min(1, (lVal - 0.55) / 0.09));
       const pWater = Math.max(pRiver, pLake);
       moisture = Math.min(1, moisture + pWater * 0.40);
@@ -281,9 +290,8 @@ export function generateChunk(options: ChunkGeneratorOptions): Tile[][] {
       }
 
       // 5. Carve U-Shaped Rivers (using downhill-gated channel widening)
-      const tRiver = 0.045 * Math.max(0, Math.min(1, (0.78 - elevation) / 0.35));
       if (!isLake && Math.abs(rVal) < tRiver && elevation >= 0.38) {
-        elevation = 0.32 + 0.04 * Math.pow(Math.abs(rVal) / tRiver, 2);
+        elevation = 0.32 + 0.04 * Math.pow(Math.abs(rVal) / (tRiver + 0.001), 2);
         terrainType = 'river';
       }
 

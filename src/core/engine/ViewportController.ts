@@ -8,8 +8,8 @@ export class ViewportController {
   private startPointer = { x: 0, y: 0 };
   private startPosition = { x: 0, y: 0 };
 
-  public minZoom = 0.15;
-  public maxZoom = 8.0;
+  public minZoom = 0.1;
+  public maxZoom = 24.0;
 
   public onViewportChange?: () => void;
 
@@ -111,7 +111,7 @@ export class ViewportController {
     const canvasHeight = this.canvas.clientHeight;
 
     // Set initial scale to fit the map height with some margin if it fits nicely
-    const scale = Math.max(0.2, Math.min(1.5, canvasHeight / (worldHeight * 1.2)));
+    const scale = Math.max(0.1, Math.min(1.5, canvasHeight / (worldHeight * 1.2)));
     this.container.scale.set(scale);
 
     // Set translation to center the map

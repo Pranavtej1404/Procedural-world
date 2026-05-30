@@ -8,6 +8,7 @@ export interface LayerVisibility {
   roads: boolean;
   npcs: boolean;
   buildings: boolean;
+  textures: boolean;
   debugGrid: boolean;
 }
 
@@ -29,10 +30,13 @@ export interface WorldState {
   visibleLayers: LayerVisibility;
   sandboxActiveChunk: { cx: number; cy: number } | null;
   sandboxTiles: Tile[][] | null;
+  showMapHUD: boolean;
+  showRecenterButton: boolean;
+  sidebarCollapsed: boolean;
 
   // Actions
   setSeed: (seed: string) => void;
-  updateConfig: (config: Partial<Omit<WorldState, 'setSeed' | 'updateConfig' | 'regenerateWorld' | 'setMapViewMode' | 'hoveredTile' | 'selectedTile' | 'setHoveredTile' | 'setSelectedTile' | 'visibleLayers' | 'toggleLayer' | 'sandboxActiveChunk' | 'setSandboxActiveChunk' | 'sandboxTiles' | 'setSandboxTiles' | 'updateSandboxTile'>>) => void;
+  updateConfig: (config: Partial<Omit<WorldState, 'setSeed' | 'updateConfig' | 'regenerateWorld' | 'setMapViewMode' | 'hoveredTile' | 'selectedTile' | 'setHoveredTile' | 'setSelectedTile' | 'visibleLayers' | 'toggleLayer' | 'sandboxActiveChunk' | 'setSandboxActiveChunk' | 'sandboxTiles' | 'setSandboxTiles' | 'updateSandboxTile' | 'setShowMapHUD' | 'setShowRecenterButton' | 'setSidebarCollapsed'>>) => void;
   setMapViewMode: (mode: 'biomes' | 'elevation' | 'moisture' | 'temperature') => void;
   regenerateWorld: () => void;
   setHoveredTile: (tile: Tile | null) => void;
@@ -41,18 +45,21 @@ export interface WorldState {
   setSandboxActiveChunk: (chunk: { cx: number; cy: number } | null) => void;
   setSandboxTiles: (tiles: Tile[][] | null) => void;
   updateSandboxTile: (lx: number, ly: number, tileUpdate: Partial<Tile>) => void;
+  setShowMapHUD: (show: boolean) => void;
+  setShowRecenterButton: (show: boolean) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 export const useWorldStore = create<WorldState>((set) => ({
   seed: 'procedural-adventures',
   tileSize: 32,
   chunkSize: 16,
-  octaves: 4,
+  octaves: 5,
   persistence: 0.5,
   lacunarity: 2.0,
-  scale: 50,
-  redistribution: 1.2,
-  applyIslandMask: 'archipelago',
+  scale: 350,
+  redistribution: 1.1,
+  applyIslandMask: 'none',
   islandRadius: 96, // 96 tiles radius (~3072px)
   mapViewMode: 'biomes',
   generationVersion: 0,
@@ -65,10 +72,14 @@ export const useWorldStore = create<WorldState>((set) => ({
     roads: true,
     npcs: true,
     buildings: true,
+    textures: true,
     debugGrid: false,
   },
   sandboxActiveChunk: null,
   sandboxTiles: null,
+  showMapHUD: true,
+  showRecenterButton: true,
+  sidebarCollapsed: false,
 
   setSeed: (seed) => set((state) => ({ 
     seed, 
@@ -118,4 +129,7 @@ export const useWorldStore = create<WorldState>((set) => ({
     };
     return { sandboxTiles: newTiles };
   }),
+  setShowMapHUD: (showMapHUD) => set({ showMapHUD }),
+  setShowRecenterButton: (showRecenterButton) => set({ showRecenterButton }),
+  setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
 }));
