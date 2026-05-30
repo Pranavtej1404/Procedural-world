@@ -5,6 +5,7 @@ import { ViewportController } from '../../core/engine/ViewportController';
 import { generateChunk, getTileTerrainAt } from '../generation/terrainGenerator';
 import type { Tile } from '../generation/terrainGenerator';
 import { getResourcesForBiome } from '../../core/world/resources';
+import type { TerrainType } from '../../core/world/terrain';
 
 const saveToLocalStorage = (key: string, dataStr: string) => {
   try {
@@ -72,6 +73,19 @@ const cleanupLegacyLocalStorage = (
   } catch (e) {
     console.error('Error cleaning legacy localStorage:', e);
   }
+};
+
+const BIOME_RGB_VALUES: Record<TerrainType, { r: number; g: number; b: number }> = {
+  deep_water: { r: 30, g: 58, b: 138 },
+  water: { r: 59, g: 130, b: 246 },
+  beach: { r: 254, g: 240, b: 138 },
+  grass: { r: 16, g: 185, b: 129 },
+  forest: { r: 4, g: 120, b: 87 },
+  desert: { r: 245, g: 158, b: 11 },
+  hills: { r: 139, g: 94, b: 60 },
+  mountain: { r: 243, g: 244, b: 246 },
+  snow: { r: 255, g: 255, b: 255 },
+  river: { r: 14, g: 165, b: 233 },
 };
 
 export const WorldCanvas: React.FC = () => {
@@ -1163,8 +1177,66 @@ export const WorldCanvas: React.FC = () => {
 
                     // 2. North Edge Transition (meadow top border)
                     if (nNotHill) {
-                      // Grid 2 Row 1 Col 2: x = 414, y = 254, w = 58, h = 55
-                      ctx.drawImage(sheet, 414, 254, 58, 55, tx, ty, tSize, tSize);
+                      const nType = getNeighborType(0, -1);
+                      const nColor = BIOME_RGB_VALUES[nType] || BIOME_RGB_VALUES.grass;
+                      const hillColor = BIOME_RGB_VALUES.hills;
+
+                      ctx.save();
+                      
+                      // 1. Draw top part (neighbor biome color)
+                      ctx.fillStyle = `rgb(${nColor.r}, ${nColor.g}, ${nColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty);
+                      ctx.lineTo(tx + tSize, ty);
+                      ctx.lineTo(tx + tSize, ty + tSize * 0.5);
+                      // Bezier curve to make a nice organic curved cliff path
+                      ctx.bezierCurveTo(
+                        tx + tSize * 0.7, ty + tSize * 0.58,
+                        tx + tSize * 0.3, ty + tSize * 0.42,
+                        tx, ty + tSize * 0.5
+                      );
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 2. Draw bottom part (hill color)
+                      ctx.fillStyle = `rgb(${hillColor.r}, ${hillColor.g}, ${hillColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty + tSize * 0.5);
+                      ctx.bezierCurveTo(
+                        tx + tSize * 0.7, ty + tSize * 0.58,
+                        tx + tSize * 0.3, ty + tSize * 0.42,
+                        tx, ty + tSize * 0.5
+                      );
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 3. Draw a dark hand-drawn styled rock ridge/cliff line
+                      ctx.strokeStyle = '#4e3321'; // Dark earthy tone for cliff edge
+                      ctx.lineWidth = 1.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty + tSize * 0.5);
+                      ctx.bezierCurveTo(
+                        tx + tSize * 0.3, ty + tSize * 0.42,
+                        tx + tSize * 0.7, ty + tSize * 0.58,
+                        tx + tSize, ty + tSize * 0.5
+                      );
+                      ctx.stroke();
+
+                      // 4. Highlight line just below to give it 3D bevel look
+                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                      ctx.lineWidth = 0.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty + tSize * 0.52);
+                      ctx.bezierCurveTo(
+                        tx + tSize * 0.3, ty + tSize * 0.44,
+                        tx + tSize * 0.7, ty + tSize * 0.60,
+                        tx + tSize, ty + tSize * 0.52
+                      );
+                      ctx.stroke();
+
+                      ctx.restore();
                     }
 
                     // 3. West Edge Transition (left slope)
@@ -1181,12 +1253,95 @@ export const WorldCanvas: React.FC = () => {
 
                     // 5. Corners
                     if (nNotHill && wNotHill) {
-                      // Top-Left corner: Grid 2 Row 1 Col 1: x = 356, y = 254, w = 58, h = 55
-                      ctx.drawImage(sheet, 356, 254, 58, 55, tx, ty, tSize, tSize);
+                      const nType = getNeighborType(0, -1);
+                      const nColor = BIOME_RGB_VALUES[nType] || BIOME_RGB_VALUES.grass;
+                      const hillColor = BIOME_RGB_VALUES.hills;
+
+                      ctx.save();
+                      
+                      // 1. Top-left neighbor region
+                      ctx.fillStyle = `rgb(${nColor.r}, ${nColor.g}, ${nColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty);
+                      ctx.lineTo(tx + tSize * 0.5, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.45, ty + tSize * 0.45, tx, ty + tSize * 0.5);
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 2. Bottom-right hill region
+                      ctx.fillStyle = `rgb(${hillColor.r}, ${hillColor.g}, ${hillColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty);
+                      ctx.lineTo(tx + tSize * 0.5, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.45, ty + tSize * 0.45, tx, ty + tSize * 0.5);
+                      ctx.lineTo(tx, ty + tSize);
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 3. Cliff edge outline
+                      ctx.strokeStyle = '#4e3321';
+                      ctx.lineWidth = 1.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx + tSize * 0.5, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.45, ty + tSize * 0.45, tx, ty + tSize * 0.5);
+                      ctx.stroke();
+
+                      // 4. Highlight
+                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                      ctx.lineWidth = 0.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx + tSize * 0.52, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.47, ty + tSize * 0.47, tx, ty + tSize * 0.52);
+                      ctx.stroke();
+
+                      ctx.restore();
                     }
                     if (nNotHill && eNotHill) {
-                      // Top-Right corner: Grid 2 Row 1 Col 3: x = 472, y = 254, w = 58, h = 55
-                      ctx.drawImage(sheet, 472, 254, 58, 55, tx, ty, tSize, tSize);
+                      const nType = getNeighborType(0, -1);
+                      const nColor = BIOME_RGB_VALUES[nType] || BIOME_RGB_VALUES.grass;
+                      const hillColor = BIOME_RGB_VALUES.hills;
+
+                      ctx.save();
+                      
+                      // 1. Top-right neighbor region
+                      ctx.fillStyle = `rgb(${nColor.r}, ${nColor.g}, ${nColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx + tSize, ty);
+                      ctx.lineTo(tx + tSize * 0.5, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.55, ty + tSize * 0.45, tx + tSize, ty + tSize * 0.5);
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 2. Bottom-left hill region
+                      ctx.fillStyle = `rgb(${hillColor.r}, ${hillColor.g}, ${hillColor.b})`;
+                      ctx.beginPath();
+                      ctx.moveTo(tx, ty);
+                      ctx.lineTo(tx, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty + tSize);
+                      ctx.lineTo(tx + tSize, ty + tSize * 0.5);
+                      ctx.quadraticCurveTo(tx + tSize * 0.55, ty + tSize * 0.45, tx + tSize * 0.5, ty);
+                      ctx.closePath();
+                      ctx.fill();
+
+                      // 3. Cliff edge outline
+                      ctx.strokeStyle = '#4e3321';
+                      ctx.lineWidth = 1.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx + tSize * 0.5, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.55, ty + tSize * 0.45, tx + tSize, ty + tSize * 0.5);
+                      ctx.stroke();
+
+                      // 4. Highlight
+                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                      ctx.lineWidth = 0.75;
+                      ctx.beginPath();
+                      ctx.moveTo(tx + tSize * 0.48, ty);
+                      ctx.quadraticCurveTo(tx + tSize * 0.53, ty + tSize * 0.47, tx + tSize, ty + tSize * 0.52);
+                      ctx.stroke();
+
+                      ctx.restore();
                     }
 
                     // Little random details (stumps, stones) placed deterministically
